@@ -10,9 +10,10 @@ services:
       AUTH_PASSWORD: "linux.do"
       AUTH_SESSION_SECRET: "change-this-secret"
       APP_TIMEZONE: "Asia/Shanghai"
+      LOG_FILE: "/app/logs/server.log"
     volumes:
       - ./repo_data:/app/repo_data
       - ./checked_data:/app/checked_data
       - ./auto_data:/app/auto_data
       - ./run_logs:/app/run_logs
-      - ./server.log:/app/server.log
+      - ./logs:/app/logs

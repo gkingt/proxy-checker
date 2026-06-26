@@ -8,6 +8,7 @@ venv/
 env/
 *.log
 server.log
+logs/
 repo_data/
 checked_data/
 auto_data/
