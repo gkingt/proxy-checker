@@ -1325,6 +1325,21 @@ function timezoneOptions(selected){
   }).join('');
 }
 
+function autoCfFilterLabel(value){
+  var map={any:'CF不过滤',bypass:'仅网页CF未拦截',blocked:'仅网页CF拦截'};
+  return map[value]||map.any;
+}
+
+function autoRepoPolicyLabel(value){
+  var map={
+    grade_a_only:'只保留A级',
+    stable_only:'稳定可用A/B/C',
+    include_unstable:'包含不稳定A/B/C/D',
+    archive_all:'所有结果留档'
+  };
+  return map[value]||map.stable_only;
+}
+
 function renderAutoProgress(data){
   var box=document.getElementById('autoProgress');
   if(!box||!data)return;
@@ -1359,6 +1374,7 @@ function renderAutoProgress(data){
   if(state.last_summary){
     var s=state.last_summary;
     html+='<div>上次: '+esc(s.status||'-')+'，检测 '+(s.done||0)+'/'+(s.total||0)+'，入库 +'+(s.repo_added||0)+'，更新 '+(s.repo_updated||0)+'，删除 '+(s.repo_removed||0)+'</div>';
+    html+='<div>筛选: '+esc(autoCfFilterLabel(s.cf_filter||config.cf_filter))+'，入库策略 '+esc(autoRepoPolicyLabel(s.repo_update_policy||config.repo_update_policy))+'</div>';
     if(s.error)html+='<div style="color:#ef4444">错误: '+esc(s.error)+'</div>';
   }
   if(Array.isArray(state.history)&&state.history.length){
@@ -1377,7 +1393,7 @@ function openAutoSettings(){
     toast('当前部署不支持后台自动任务');
     return;
   }
-  showAutoModal(autoStatusCache||{config:{enabled:false,target_profile:currentTargetProfile,detect_mode:'skip',repo_update_policy:'stable_only'},state:{status:'idle',running:false}});
+  showAutoModal(autoStatusCache||{config:{enabled:false,target_profile:currentTargetProfile,detect_mode:'skip',cf_filter:'any',repo_update_policy:'stable_only'},state:{status:'idle',running:false}});
   post('/api/auto/get',{token:getUserToken(),since:autoResultsIndex,session_id:autoSessionId},function(err,res){
     if(!document.querySelector('.modal-overlay[data-modal=\"auto\"]'))return;
     if(err||res.error){
@@ -1412,7 +1428,8 @@ function showAutoModal(data){
   html+='<div class="auto-field"><label>计划时区</label><select id="autoTimezone">'+timezoneOptions(config.timezone||appSettings.timezone)+'</select></div>';
   html+='<div class="auto-field"><label>检测模式</label><select id="autoTargetProfile">'+autoProfileOptions(config.target_profile||currentTargetProfile)+'</select></div>';
   html+='<div class="auto-field"><label>检测范围</label><select id="autoDetectMode"><option value="skip">只检测新代理</option><option value="force">强制检测全部</option></select></div>';
-  html+='<div class="auto-field full"><label>入库策略</label><select id="autoRepoPolicy"><option value="stable_only">只入库稳定可用(A/B/C)，复测失败旧代理会删除</option><option value="include_unstable">包含不稳定(A/B/C/D)，复测失败旧代理会删除</option><option value="archive_all">所有结果都留档，失效代理也保留</option></select></div>';
+  html+='<div class="auto-field"><label>网页CF是否拦截</label><select id="autoCfFilter"><option value="any">不过滤CF结果</option><option value="bypass">只保留网页CF未拦截</option><option value="blocked">只保留网页CF拦截</option></select></div>';
+  html+='<div class="auto-field"><label>入库策略</label><select id="autoRepoPolicy"><option value="grade_a_only">只保留A级，复测失败旧代理会删除</option><option value="stable_only">只入库稳定可用(A/B/C)，复测失败旧代理会删除</option><option value="include_unstable">包含不稳定(A/B/C/D)，复测失败旧代理会删除</option><option value="archive_all">所有结果都留档，失效代理也保留</option></select></div>';
   html+='<div class="auto-field full"><div class="settings-note">本轮自动检测使用全局设置：'+esc(getRoundsValue())+' 轮，并发 '+esc(getConcurrentValue())+'。要修改请打开“设置”。</div></div>';
   html+='</div>';
   html+='<div class="auto-action-row">';
@@ -1424,6 +1441,7 @@ function showAutoModal(data){
   overlay.innerHTML=html;
   document.body.appendChild(overlay);
   document.getElementById('autoDetectMode').value=config.detect_mode||'skip';
+  document.getElementById('autoCfFilter').value=config.cf_filter||'any';
   document.getElementById('autoRepoPolicy').value=config.repo_update_policy||'stable_only';
   updateAutoScheduleFields();
   renderAutoProgress(data);
@@ -1449,6 +1467,7 @@ function readAutoConfigFromModal(){
     rounds:getRoundsValue(),
     max_concurrent:getConcurrentValue(),
     detect_mode:document.getElementById('autoDetectMode').value,
+    cf_filter:document.getElementById('autoCfFilter').value,
     repo_update_policy:document.getElementById('autoRepoPolicy').value
   };
 }
@@ -1629,6 +1648,8 @@ function showRunLogsModal(logs){
       html+='<span class="log-pill">并发 '+esc(item.max_concurrent||'-')+'</span>';
       if(item.schedule_type)html+='<span class="log-pill">'+esc(item.schedule_type==='daily'?'每天固定':'间隔执行')+'</span>';
       if(item.timezone)html+='<span class="log-pill">'+esc(item.timezone)+'</span>';
+      if(item.cf_filter)html+='<span class="log-pill">'+esc(autoCfFilterLabel(item.cf_filter))+'</span>';
+      if(item.repo_update_policy)html+='<span class="log-pill">'+esc(autoRepoPolicyLabel(item.repo_update_policy))+'</span>';
       html+='<span class="log-pill">检测 '+esc(item.done||0)+'/'+esc(item.total||0)+'</span>';
       html+='<span class="log-pill">有效 '+esc(item.valid_count||0)+'</span>';
       html+='<span class="log-pill">不稳定 '+esc(item.unstable_count||0)+'</span>';

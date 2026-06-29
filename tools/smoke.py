@@ -152,6 +152,9 @@ def main() -> None:
         "function maybePromptAutoStoppedRepo(",
         "function openAppSettings()",
         "function openRunLogs()",
+        "autoCfFilterLabel",
+        "grade_a_only",
+        "cf_filter",
         "target_profile",
     ):
         if expected not in app_js:

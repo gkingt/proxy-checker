@@ -486,6 +486,7 @@ def compact_run_log(entry):
     for key in (
         "finished_at", "duration_seconds", "session_id", "reason", "target_profile",
         "target_name", "rounds", "max_concurrent", "detect_mode", "repo_update_policy",
+        "cf_filter",
         "schedule_type", "interval_hours", "daily_time", "timezone", "source_count",
         "repo_input_count", "repo_count", "input_count", "skipped", "total", "done",
         "valid_count", "unstable_count", "invalid_count", "repo_added", "repo_updated",
@@ -578,6 +579,7 @@ def default_auto_config():
         "rounds": CHECK_ROUNDS,
         "max_concurrent": MAX_CONCURRENT,
         "detect_mode": "skip",
+        "cf_filter": "any",
         "repo_update_policy": "stable_only",
     }
 
@@ -622,8 +624,11 @@ def normalize_auto_config(config):
     detect_mode = str(merged.get("detect_mode") or "skip")
     if detect_mode not in ("skip", "force"):
         detect_mode = "skip"
+    cf_filter = str(merged.get("cf_filter") or "any")
+    if cf_filter not in ("any", "bypass", "blocked"):
+        cf_filter = "any"
     repo_update_policy = str(merged.get("repo_update_policy") or "stable_only")
-    if repo_update_policy not in ("stable_only", "include_unstable", "archive_all"):
+    if repo_update_policy not in ("grade_a_only", "stable_only", "include_unstable", "archive_all"):
         repo_update_policy = "stable_only"
     return {
         "enabled": bool(merged.get("enabled")),
@@ -635,6 +640,7 @@ def normalize_auto_config(config):
         "rounds": CHECK_ROUNDS,
         "max_concurrent": normalize_max_concurrent(MAX_CONCURRENT),
         "detect_mode": detect_mode,
+        "cf_filter": cf_filter,
         "repo_update_policy": repo_update_policy,
     }
 
@@ -1010,17 +1016,24 @@ def result_to_repo_item(result, existing=None):
     return compact_repo_item(item)
 
 
-def result_matches_policy(result, policy):
+def result_matches_policy(result, policy, cf_filter="any"):
+    if cf_filter == "bypass" and result.get("cf_bypass") is not True:
+        return False
+    if cf_filter == "blocked" and not (result.get("cf_challenge") is True and result.get("cf_bypass") is not True):
+        return False
     grade = str(result.get("grade") or "F")
     if policy == "archive_all":
         return True
+    if policy == "grade_a_only":
+        return grade == "A"
     if policy == "include_unstable":
         return grade in ("A", "B", "C", "D") or result.get("valid") or result.get("unstable")
     return grade in ("A", "B", "C") or result.get("valid")
 
 
-def merge_repo_results(token, repo, results, checked_inputs, policy):
-    policy = policy if policy in ("stable_only", "include_unstable", "archive_all") else "stable_only"
+def merge_repo_results(token, repo, results, checked_inputs, policy, cf_filter="any"):
+    policy = policy if policy in ("grade_a_only", "stable_only", "include_unstable", "archive_all") else "stable_only"
+    cf_filter = cf_filter if cf_filter in ("any", "bypass", "blocked") else "any"
     participating = {proxy_key(proxy) for proxy in checked_inputs}
     result_by_key = {}
     for result in results:
@@ -1039,7 +1052,7 @@ def merge_repo_results(token, repo, results, checked_inputs, policy):
     for item in compact_repo(repo):
         key = proxy_key(item["proxy"])
         result = result_by_key.get(key)
-        if policy != "archive_all" and key in participating and result and not result_matches_policy(result, policy):
+        if policy != "archive_all" and key in participating and result and not result_matches_policy(result, policy, cf_filter):
             removed += 1
             used_old_keys.add(key)
             continue
@@ -1049,7 +1062,7 @@ def merge_repo_results(token, repo, results, checked_inputs, policy):
     added = 0
     updated = 0
     for result in results:
-        if not result_matches_policy(result, policy):
+        if not result_matches_policy(result, policy, cf_filter):
             continue
         candidate_keys = [proxy_key(result.get("original")), proxy_key(result.get("proxy"))]
         existing = None
@@ -1097,6 +1110,7 @@ def build_auto_summary(runtime, status, error=None, repo_summary=None):
         "rounds": runtime.get("rounds", CHECK_ROUNDS),
         "max_concurrent": runtime.get("max_concurrent", MAX_CONCURRENT),
         "detect_mode": runtime.get("detect_mode", "skip"),
+        "cf_filter": runtime.get("cf_filter", "any"),
         "repo_update_policy": runtime.get("repo_update_policy", "stable_only"),
         "schedule_type": runtime.get("schedule_type"),
         "interval_hours": runtime.get("interval_hours"),
@@ -1192,6 +1206,7 @@ def execute_auto_run(token, config, run_id, reason):
                 "rounds": config["rounds"],
                 "max_concurrent": config["max_concurrent"],
                 "detect_mode": config["detect_mode"],
+                "cf_filter": config["cf_filter"],
                 "repo_update_policy": config["repo_update_policy"],
                 "repo_count": len(repo),
                 "input_count": len(combined),
@@ -1230,6 +1245,7 @@ def execute_auto_run(token, config, run_id, reason):
             results=runtime.get("results", []),
             checked_inputs=to_check,
             policy=config["repo_update_policy"],
+            cf_filter=config["cf_filter"],
         )
         finalize_auto_run(token, runtime, "completed", repo_summary=repo_summary)
     except Exception as exc:
@@ -1245,6 +1261,7 @@ def execute_auto_run(token, config, run_id, reason):
                 "rounds": config.get("rounds", CHECK_ROUNDS),
                 "max_concurrent": config.get("max_concurrent", MAX_CONCURRENT),
                 "detect_mode": config.get("detect_mode", "skip"),
+                "cf_filter": config.get("cf_filter", "any"),
                 "repo_update_policy": config.get("repo_update_policy", "stable_only"),
             }
         log.error("Auto run failed", extra={"token": token, "error": str(exc)}, exc_info=True)
@@ -1286,6 +1303,7 @@ def start_auto_run(token, reason="schedule"):
             "rounds": config["rounds"],
             "max_concurrent": config["max_concurrent"],
             "detect_mode": config["detect_mode"],
+            "cf_filter": config["cf_filter"],
             "repo_update_policy": config["repo_update_policy"],
             "schedule_type": config["schedule_type"],
             "interval_hours": config["interval_hours"],
@@ -1308,6 +1326,7 @@ def start_auto_run(token, reason="schedule"):
             "rounds": config["rounds"],
             "max_concurrent": config["max_concurrent"],
             "detect_mode": config["detect_mode"],
+            "cf_filter": config["cf_filter"],
             "repo_update_policy": config["repo_update_policy"],
             "schedule_type": config["schedule_type"],
             "interval_hours": config["interval_hours"],
@@ -1389,6 +1408,7 @@ def mark_interrupted_auto_runs():
                 "rounds": config.get("rounds", CHECK_ROUNDS),
                 "max_concurrent": config.get("max_concurrent", MAX_CONCURRENT),
                 "detect_mode": config.get("detect_mode", "skip"),
+                "cf_filter": config.get("cf_filter", "any"),
                 "repo_update_policy": config.get("repo_update_policy", "stable_only"),
                 "error": "服务重启，上一轮自动任务已中断",
             }
